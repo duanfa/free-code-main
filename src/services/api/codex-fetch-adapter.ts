@@ -738,6 +738,42 @@ async function translateCodexStreamToAnthropic(
 
 const CODEX_BASE_URL = 'https://chatgpt.com/backend-api/codex/responses'
 
+type OpenAIKeyAuthConfig = {
+  apiKey: string
+  baseUrl?: string
+}
+
+function buildResponsesUrl(baseUrl?: string): string {
+  const normalized = (baseUrl || 'https://api.openai.com/v1').trim().replace(/\/+$/, '')
+  if (normalized.includes('/responses')) {
+    return normalized
+  }
+  return `${normalized}/responses`
+}
+
+function withOptionalApiVersion(url: string): string {
+  const apiVersion = process.env.AZURE_OPENAI_API_VERSION?.trim()
+  if (!apiVersion) return url
+  try {
+    const parsed = new URL(url)
+    if (!parsed.searchParams.has('api-version')) {
+      parsed.searchParams.set('api-version', apiVersion)
+    }
+    return parsed.toString()
+  } catch {
+    return url
+  }
+}
+
+function isAzureOpenAIUrl(url: string): boolean {
+  try {
+    const host = new URL(url).host.toLowerCase()
+    return host.includes('openai.azure.com') || host.includes('services.ai.azure.com') || host.includes('cognitiveservices.azure.com')
+  } catch {
+    return false
+  }
+}
+
 /**
  * Creates a fetch function that intercepts Anthropic API calls and routes them to Codex.
  * @param accessToken - The Codex access token for authentication
@@ -807,6 +843,72 @@ export function createCodexFetch(
     }
 
     // Translate streaming response
+    return translateCodexStreamToAnthropic(codexResponse, codexModel)
+  }
+}
+
+export function createOpenAIKeyFetch(
+  config: OpenAIKeyAuthConfig,
+): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {
+  const responsesUrl = withOptionalApiVersion(buildResponsesUrl(config.baseUrl))
+  const useAzureApiKeyHeader = isAzureOpenAIUrl(responsesUrl)
+  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = input instanceof Request ? input.url : String(input)
+    if (!url.includes('/v1/messages')) {
+      return globalThis.fetch(input, init)
+    }
+
+    let anthropicBody: Record<string, unknown>
+    try {
+      const bodyText =
+        init?.body instanceof ReadableStream
+          ? await new Response(init.body).text()
+          : typeof init?.body === 'string'
+            ? init.body
+            : '{}'
+      anthropicBody = JSON.parse(bodyText)
+    } catch {
+      anthropicBody = {}
+    }
+
+    const { codexBody, codexModel } = translateToCodexBody(anthropicBody)
+    const modelOverride =
+      process.env.AZURE_OPENAI_DEPLOYMENT?.trim() ||
+      process.env.AZURE_OPENAI_MODEL?.trim() ||
+      process.env.OPENAI_MODEL?.trim()
+    if (modelOverride) {
+      codexBody.model = modelOverride
+    }
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+    }
+    if (useAzureApiKeyHeader) {
+      headers['api-key'] = config.apiKey
+    } else {
+      headers.Authorization = `Bearer ${config.apiKey}`
+    }
+
+    const codexResponse = await globalThis.fetch(responsesUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(codexBody),
+    })
+
+    if (!codexResponse.ok) {
+      const errorText = await codexResponse.text()
+      const errorBody = {
+        type: 'error',
+        error: {
+          type: 'api_error',
+          message: `OpenAI-compatible API error (${codexResponse.status}): ${errorText}`,
+        },
+      }
+      return new Response(JSON.stringify(errorBody), {
+        status: codexResponse.status,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
     return translateCodexStreamToAnthropic(codexResponse, codexModel)
   }
 }

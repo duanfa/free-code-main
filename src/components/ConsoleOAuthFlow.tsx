@@ -455,6 +455,17 @@ function OAuthStatusMessage(t0) {
           t7 = <Box><Select options={t6} onChange={value_0 => {
               if (value_0 === "platform" || value_0 === "azure") {
                 logEvent(value_0 === "platform" ? "tengu_oauth_platform_selected" : "tengu_oauth_azure_selected", {});
+                if (value_0 === "azure") {
+                  const hasOpenAIKey_0 = !!(process.env.AZURE_OPENAI_API_KEY || process.env.OPENAI_API_KEY);
+                  if (hasOpenAIKey_0) {
+                    setLoginWithCodex(false);
+                    setLoginWithClaudeAi(false);
+                    setOAuthStatus({
+                      state: "success"
+                    });
+                    return;
+                  }
+                }
                 setOAuthStatus({
                   state: "platform_setup"
                 });

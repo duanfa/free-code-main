@@ -1632,6 +1632,11 @@ export function isCodexSubscriber(): boolean {
     return false
   }
 
+  // OpenAI-compatible key-based auth (OpenAI/Azure OpenAI)
+  if (process.env.OPENAI_API_KEY || process.env.AZURE_OPENAI_API_KEY) {
+    return true
+  }
+
   // Verify we actually have valid Codex tokens
   const tokens = getCodexOAuthTokens()
   return !!tokens?.accessToken
@@ -1801,7 +1806,8 @@ export function isUsing3PServices(): boolean {
   return !!(
     isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) ||
     isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_OPENAI)
   )
 }
 

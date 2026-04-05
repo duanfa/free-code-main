@@ -35,7 +35,7 @@ import {
   getVertexRegionForModel,
   isEnvTruthy,
 } from '../../utils/envUtils.js'
-import { createCodexFetch } from './codex-fetch-adapter.js'
+import { createCodexFetch, createOpenAIKeyFetch } from './codex-fetch-adapter.js'
 
 /**
  * Environment variables for different client types:
@@ -305,7 +305,26 @@ export async function getAnthropicClient({
     return new AnthropicVertex(vertexArgs) as unknown as Anthropic
   }
 
-  // ── Codex (OpenAI) provider via fetch adapter ─────────────────────
+  // ── OpenAI-compatible provider via fetch adapter ───────────────────
+  const openAIKey =
+    process.env.OPENAI_API_KEY || process.env.AZURE_OPENAI_API_KEY
+  const openAIBaseUrl =
+    process.env.OPENAI_BASE_URL ||
+    process.env.AZURE_OPENAI_BASE_URL ||
+    process.env.AZURE_OPENAI_ENDPOINT
+  if (getAPIProvider() === 'openai' && openAIKey) {
+    const openAIFetch = createOpenAIKeyFetch({
+      apiKey: openAIKey,
+      baseUrl: openAIBaseUrl,
+    })
+    const clientConfig: ConstructorParameters<typeof Anthropic>[0] = {
+      apiKey: 'openai-compatible-placeholder',
+      ...ARGS,
+      fetch: openAIFetch as unknown as typeof globalThis.fetch,
+      ...(isDebugToStdErr() && { logger: createStderrLogger() }),
+    }
+    return new Anthropic(clientConfig)
+  }
   if (isCodexSubscriber()) {
     const codexTokens = getCodexOAuthTokens()
     if (codexTokens?.accessToken) {
